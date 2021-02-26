@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <cblas.h>
 #include <omp.h>
@@ -17,8 +18,9 @@ double RandomReal(double low, double high);
 void* InitEigV(int n, int num_eig, double *Z,
 	       double low, double high);
 
-double GetSearchDir(int n, double* K, double* M,
-		   double* X, double* Y);
+void* GetSearchDir(int n, int num_eig, double* K,
+		    double* M, double* X, double* Y,
+		    double* rho);
 void* SetupPQ(int n, int num_eig, double* PQ,
 	      double* KM, double* XY, double* YX, 
 	      double* search_dir);
@@ -38,8 +40,9 @@ void* ComputeEigVec(int n, int m, int num_eig,
 void* NormalizeEigVec(int n, int num_eig, double* X, double* Y);
 
 
-double GetResidualNorm(int m, double* K, double* M, double* X,
-		       double* Y, double eigVal);
+void* GetResidualNorm(int m, int num_eig, double* K, double* M,
+		       double* X, double* Y,
+		       double* eigVal, double* resnorm);
 
 
 void* ApplyGenericPreconditionier(int m, int num_eig,
@@ -104,42 +107,42 @@ void* InitEigV(int n, int num_eig, double* Z,
   return NULL;
 }
 
-double GetSearchDir(int n, double* K,
-		   double* M, double* X, double* Y) {
+void* GetSearchDir(int n, int num_eig, double* K,
+		    double* M, double* X, double* Y,
+		    double* rho) {
 
-  double num1, num2, denom, ret;
-  double *work, *x, *y;
+  double num1, num2, denom;
+  double *work, *TransX, *TransY;
+
 
   work = xmalloc(n*sizeof(double));
-  x = xmalloc(n*sizeof(double));
-  y = xmalloc(n*sizeof(double));
+  TransX = xmalloc(n*num_eig*sizeof(double));
+  TransY = xmalloc(n*num_eig*sizeof(double));
 
-
-  /* Why is this in here? */
-  for(int i = 0; i < n; i++) {
-    *(x+i) = *(X+i);
-    *(y+i) = *(Y+i);
-  }
+  MatrixTrans(n, num_eig, X, TransX);
+  MatrixTrans(n, num_eig, Y, TransY);
 
   /* Calculate the first rho as initial start for the calculation */
   /* Calculate M*x from x^T*M*x, then the dot product */
-  MatrixVectorMult_N(n, n, K, x, work);
-  num1 = DotProduct(n, x, work);
+  for (int i = 0; i < num_eig; i++) {
+    MatrixVectorMult_N(n, n, K, TransX+i*n, work);
+    num1 = DotProduct(n, TransX+i*n, work);
 
-  MatrixVectorMult_N(n, n, M, y, work);
-  num2 = DotProduct(n, y, work);
+    MatrixVectorMult_N(n, n, M, TransY+i*n, work);
+    num2 = DotProduct(n, TransY+i*n, work);
 
   /* Calculate the denominator */
-  denom = DotProduct(n, x, y);
-  denom = 2*fabs(denom);
+    denom = DotProduct(n, TransX+i*n, TransY+i*n);
+    denom = 2*fabs(denom);
 
+    *(rho+i) = (num1 + num2) / denom;
+  }
+
+  free( TransX );
+  free( TransY );
   free( work );
-  free( x );
-  free( y );
 
-  ret = (num1+num2)/denom;
-
-  return ret;
+  return NULL;
 }
 
 void* SetupPQ(int n, int num_eig, double* PQ,
@@ -200,6 +203,10 @@ void* SetupHsr(int n, int m, double* U, double* V, double* W,
   work = xmalloc(m*n*sizeof(double));
   work1 = xmalloc(m*m*sizeof(double));
 
+  // Set all entries in Hsr to 0 to get rid of
+  // diagonalization from previous iteration
+  memset(Hsr, 0, 2*2*m*m*sizeof(double));
+
   /* Compute top right block matrix first */
   MatrixMult_NN(n, m, n, K, U, work);
   MatrixMult_TN(m, m, n, U, work, work1);
@@ -240,6 +247,10 @@ void* SortEig(int n, int m, double* EigVal, double* EigVec,
   double last_min = 0.0;
   int idx = 0;
 
+  double TransEigVec[m*m];
+  double TransEigVecSort[n*m];
+  MatrixTrans(m, m, EigVec, TransEigVec);
+
   for (int i = 0; i < n; i++) {
     curr = INFINITY;
     for (int j = 0; j < m; j++) {
@@ -261,18 +272,19 @@ void* SortEig(int n, int m, double* EigVal, double* EigVec,
 
   for (int i = 0; i < n; i++) {
     for (int j = 0; j < m; j++) {
-      *(EigVecSort+j+i*m) = *(EigVec+j+arrSorted[i]*m);
+      *(TransEigVecSort+j+i*m) = *(TransEigVec+j+arrSorted[i]*m);
     }
   }
-
+  MatrixTrans(n, m, TransEigVecSort, EigVecSort);
   return NULL;
 }
 
 void* SplitEigVec(int n, int m, double* EigVec, double* Xsr, double* Ysr) {
-  for (int i = 0; i < n; i++) {
-    for (int j = 0; j < m/2; j++) {
-      *(Ysr+j+i*m/2) = *(EigVec+j+i*m);
-      *(Xsr+j+i*m/2) = *(EigVec+j+i*m+m/2);
+  for (int i = 0; i < n*m; i++) {
+    if (i < n*m/2) {
+      *(Ysr+i) = *(EigVec+i);
+    } else {
+      *(Xsr+i-n*m/2) = *(EigVec+i);
     }
   }
 
@@ -306,8 +318,8 @@ void* NormalizeEigVec(int n, int num_eig, double* X, double* Y) {
 
   double norm, normx, normy;
   for(int i = 0; i < num_eig; i++) {
-    normx = DotProduct(n, Xtrans+i*n, Xtrans+i*n);
-    normy = DotProduct(n, Ytrans+i*n, Ytrans+i*n);
+    normx = ASum(n, Xtrans+i*n);
+    normy = ASum(n, Ytrans+i*n);
 
     norm = normx + normy;
 
@@ -324,40 +336,61 @@ void* NormalizeEigVec(int n, int num_eig, double* X, double* Y) {
   return NULL;
 }      
 
-double GetResidualNorm(int m, double* K, double* M, double* X, double* Y,
-		      double eigVal) {
-  double norm, nominator, denominator, work;
+void* GetResidualNorm(int m, int num_eig, double* K, double* M,
+		       double* X, double* Y,
+		       double* eigVal, double* resnorm) {
+  double nominator, denominator, work, normH;
   double *work1, *work2;
   work1 = xmalloc(m*sizeof(double));
   work2 = xmalloc(m*sizeof(double));
 
+  double *TransX, *TransY;
+  TransX = xmalloc(m*num_eig*sizeof(double));
+  TransY = xmalloc(m*num_eig*sizeof(double));
+
+  MatrixTrans(m, num_eig, X, TransX);
+  MatrixTrans(m, num_eig, Y, TransY);
+
+  double* Z;
+  Z = xmalloc(2*m*sizeof(double));
   /* calculate denominator first */
   work = Get1Norm(m, m, K);
-  denominator = Get1Norm(m, m, M);
-  denominator = max(work, denominator);
-  denominator += eigVal;
-  work = DotProduct(m, X, X);
-  work += DotProduct(m, Y, Y);
-  denominator *= work;
+  normH = Get1Norm(m, m, M);
+  normH = max(work, normH);
+
+  for (int i = 0; i < num_eig; i++) {
+    // create Z vector
+    for(int j = 0; j < 2*m; j++) {
+      if (j < m) {
+	*(Z+j) = *(TransY+j+i*m);
+      } else {
+	*(Z+j) =*(TransX+j+i*m-m);
+      }
+    }
+    // calculate denominator
+    denominator = normH + eigVal[i];
+    work = ASum(2*m, Z);
+    denominator *= work;
 
   /* calculate nominator */
-  MatrixVectorMult_N(m, m, K, X, work1);
-  CopyVec(m, Y, work2);
-  ScaleVec(m, work2, eigVal);
-  SubVec(m, work1, work2);
-  nominator = ASum(m, work1);
+    MatrixVectorMult_N(m, m, K, TransX+i*m, work1);
+    CopyVec(m, TransY+i*m, work2);
+    ScaleVec(m, work2, eigVal[i]);
+    SubVec(m, work1, work2);
+    nominator = ASum(m, work1);
 
-  MatrixVectorMult_N(m, m, M, Y, work1);
-  CopyVec(m, X, work2);
-  ScaleVec(m, work2, eigVal);
-  SubVec(m, work1, work2);
-  nominator += ASum(m, work1);
+    MatrixVectorMult_N(m, m, M, TransY+i*m, work1);
+    CopyVec(m, TransX+i*m, work2);
+    ScaleVec(m, work2, eigVal[i]);
+    SubVec(m, work1, work2);
+    nominator += ASum(m, work1);
 
-  norm = nominator/denominator;
+    resnorm[i] = nominator/denominator;
+  }
 
   free( work1 );
   free( work2 );
-  return norm;
+  return NULL;
 }
 
 void* ApplyGenericPreconditioner(int m, int num_eig, double* KMinv, double* PQ) {
@@ -508,7 +541,7 @@ void* SingSetupEigVec(int r, int l12, double* R,
 void* PrintArray(int row, int col, double* Arr) {
   for(int i = 0; i < col; i++) {
     for(int j = 0; j < row; j++) {
-      printf("%f\t", *(Arr+j+i*row));
+      printf("%.6e\t", *(Arr+j+i*row));
     }
     printf("\n");
   }
@@ -520,16 +553,34 @@ void* PrintArray(int row, int col, double* Arr) {
 
 int main(void) {
   int size = 1862;
-  int numeig = 5;
+  int numeig = 2;
 
   // Get off-diagonal matrices
-  double *K, *M;
+    double *K, *M;
   K = xmalloc(size*size*sizeof(double));
   M = xmalloc(size*size*sizeof(double));
 
   LoadMatrix(K, size*size, "K.txt");
   LoadMatrix(M, size*size, "M.txt");
+  /*
+  double K[64] = {4.928320, 0.025793, 0.052951, -0.061457, 0.003689, 0.117414, -0.032168,-0.020979,
+		  0.025793, 4.983653, -0.053805, -0.087340, 0.047473, -0.040380, 0.032443, 0.127336,
+		  0.052951, -0.053805, 4.925665, 0.072362, -0.028482, 0.019990, 0.061028, -0.026909,
+		  -0.061457, -0.087340, 0.072362, 4.817192, 0.076393, 0.044845, 0.014307, 0.092048,
+		  0.003689, 0.047473, -0.028482, 0.076393, 4.906923, 0.049800, -0.006088, -0.121430,
+		  0.117414, -0.040380, 0.019990, 0.044845, 0.049800, 4.938623, -0.097788, 0.027653,
+		  -0.032168, 0.032443, 0.061028, 0.014307, -0.006088, -0.097788, 4.938039, 0.046206,
+		  -0.020979, 0.127336, -0.026909, 0.092048, -0.121430, 0.027653, 0.046206, 4.842173};
 
+  double M[64] = {4.771923, -0.078584, -0.048857, -0.030294, -0.011211, -0.016098, 0.066103, 0.009089,
+		  -0.078584, 4.885744, 0.009801, 0.095645, 0.019762, 0.045331, -0.009861, 0.004445,
+		  -0.048857, 0.009801, 4.808262, 0.016009, 0.065539, -0.107984, 0.022994, 0.102522,
+		  -0.030294, 0.095645, 0.016009, 4.894399, -0.010249, -0.067917, 0.007982, 0.079571,
+		  -0.011211, 0.019762, 0.065539, -0.010249, 4.730263, 0.022011, 0.016681, -0.004333,
+		  -0.016098, 0.045331, -0.107984, -0.067917, 0.022011, 4.874459, 0.035306, -0.059140,
+		  0.066103, -0.009861, 0.022994, 0.007982, 0.016681, 0.035306, 4.760353, -0.008420,
+		  0.009089, 0.004445, 0.102522, 0.079571, -0.004333, -0.059140, -0.008420, 4.681968};
+  */
   // Get inverse for those, for preconditioner
   double *Kinv, *Minv;
   Kinv = xmalloc(size*size*sizeof(double));
@@ -547,29 +598,46 @@ int main(void) {
 
   InitEigV(size, numeig, X, -1.0, 1.0);
   InitEigV(size, numeig, Y, -1.0, 1.0);
+  
 
+  //  GetQ(size, numeig, X);
+  //  GetQ(size, numeig, Y);
+  //  NormalizeEigVec(size, numeig, X, Y);
+  /*double X[16] = {0.680375, -0.444451,
+		  -0.211234, 0.107940,
+		  0.566198, -0.045206,
+		  0.596880, 0.257742,
+		  0.823295, -0.270431,
+		  -0.604897, 0.026802,
+		  -0.329554, 0.904459,
+		  -0.536459, 0.832390};
+  double Y[16] = {0.271423, -0.686642,
+		  0.434594, -0.198111,
+		  -0.716795, -0.740419,
+		  0.213938, -0.782382,
+		  -0.967399, 0.997849,
+		  -0.514226, -0.563486,
+		  -0.725537, 0.025865,
+		  0.608354, 0.678224};*/
   // Initialize first search direction
-  double rho0 = GetSearchDir(size, K, M, X, Y);
+  double rho0[numeig];
+  GetSearchDir(size, numeig, K, M, X, Y, rho0);
 
   double *rho;
   rho = xcalloc(numeig*numeig, sizeof(double));
   for (int i = 0; i < numeig; i++) {
-    *(rho+i+i*numeig) = rho0;
+    *(rho+i+i*numeig) = rho0[i];
   }
 
   double res1[numeig];
-  for (int i = 0; i < numeig; i++) {
-    res1[i] = GetResidualNorm(size, K, M, X, Y, rho0);
-    printf("%f\n", res1[i]);
-  }
-  printf("\n");
+  GetResidualNorm(size, numeig, K, M, X, Y, rho0, res1);
 
   // Setup P and Q
   double *P, *Q;
   P = xmalloc(size*numeig*sizeof(double));
   Q = xmalloc(size*numeig*sizeof(double));
-  SetupPQ(size, numeig, P, K, X, Y, rho);
-  SetupPQ(size, numeig, Q, M, Y, X, rho);
+  SetupPQ(size, numeig, P, K, Y, X, rho);
+  SetupPQ(size, numeig, Q, M, X, Y, rho);
 
   //Apply Preconditioner, note that afterwards, P and Q are swapped
   ApplyGenericPreconditioner(size, numeig, Kinv, P);
@@ -587,12 +655,13 @@ int main(void) {
   GetQ(size, 2*numeig, V);
 
   // Setup W
-  /*  double *W;
-  W = xmalloc(2*numeig*2*numeig*sizeof(double));
-  SetupW(size, 2*numeig, U, V, W);*/
-
   double* Winv;
   Winv = xmalloc(2*numeig*2*numeig*sizeof(double));
+  SetupW(size, 2*numeig, U, V, Winv);
+  MInverse(Winv, 2*numeig);
+  double s[2*numeig];
+  SVD(2*numeig, 2*numeig, s, Winv);
+  //  PrintArray(2*numeig, 1, s);
   SetupW(size, 2*numeig, U, V, Winv);
   MInverse(Winv, 2*numeig);
 
@@ -605,7 +674,7 @@ int main(void) {
   double eVal[4*numeig];
   double* eVec;
   eVec = xmalloc(4*numeig*4*numeig*sizeof(double));
-  EigVal(4*numeig, Hsr, eVal, eVec);
+  CalcEigVal(4*numeig, Hsr, eVal, eVec);
 
   // Sort Eigenvalues and pick the numeig smallest positive ones
   // and their corresponding Eigenvectors
@@ -613,7 +682,7 @@ int main(void) {
   double* eVecSort;
   eVecSort = xmalloc(numeig*4*numeig*sizeof(double));
   SortEig(numeig, 4*numeig, eVal, eVec, eValSort, eVecSort);
-
+ 
   // Split EigenVectors into X and Y component
   double *Xsr, *Ysr;
   Xsr = xmalloc(numeig*2*numeig*sizeof(double));
@@ -632,11 +701,8 @@ int main(void) {
 
   // Calculate residual norm
   double res[numeig];
-  for (int i = 0; i < numeig; i++) {
-    res[i] = GetResidualNorm(size, K, M, X1+i*size, Y1+i*size, eValSort[i]);
-  }
+  GetResidualNorm(size, numeig, K, M, X1, Y1, eValSort, res);
   PrintArray(numeig, 1, res);
-  PrintArray(numeig, 1, eValSort);
 
   // Assign Eigenvalues as new search directions (rho)
   for (int i = 0; i < numeig; i++) {
@@ -654,7 +720,7 @@ int main(void) {
   U = xmalloc(size*3*numeig*sizeof(double));
   V = xmalloc(size*3*numeig*sizeof(double));
   Winv = xmalloc(3*numeig*3*numeig*sizeof(double));
-  Hsr = xmalloc(6*numeig*6*numeig*sizeof(double));
+  Hsr = calloc(6*numeig*6*numeig,sizeof(double));
   Xsr = xmalloc(numeig*3*numeig*sizeof(double));
   Ysr = xmalloc(numeig*3*numeig*sizeof(double));
   eVec = xmalloc(6*numeig*6*numeig*sizeof(double));
@@ -664,13 +730,15 @@ int main(void) {
 
   double* eVecwork;
   eVecwork = xmalloc(size*numeig*sizeof(double));
+  double* singval;
+  singval = xmalloc(3*numeig*sizeof(double));
  
-  int maxiter = 1;
+  int maxiter = 200;
   for(int iter = 0; iter < maxiter; iter++) {
 
     // setup new P & Q
-    SetupPQ(size, numeig, P, K, X1, Y1, rho);
-    SetupPQ(size, numeig, Q, M, Y1, X1, rho);
+    SetupPQ(size, numeig, P, K, Y1, X1, rho);
+    SetupPQ(size, numeig, Q, M, X1, Y1, rho);
 
     // Apply Precondittioner
     ApplyGenericPreconditioner(size, numeig, Kinv, P);
@@ -679,7 +747,7 @@ int main(void) {
     // Setup U and V
     SetupUV(size, numeig, P, X1, X, U);
     SetupUV(size, numeig, Q, Y1, Y, V);
-
+    
     // Orthogonalize U and V
     GetQ(size, 3*numeig, U);
     GetQ(size, 3*numeig, V);
@@ -688,11 +756,17 @@ int main(void) {
     SetupW(size, 3*numeig, U, V, Winv);
     MInverse(Winv, 3*numeig);
 
+    //    PrintArray(3*numeig, 1, singval);
+
+    SetupW(size, 3*numeig, U, V, Winv);
+    MInverse(Winv, 3*numeig);
+
     // Setup Hsr
+    memset(Hsr, 0, 6*numeig*6*numeig*sizeof(double));
     SetupHsr(size, 3*numeig, U, V, Winv, K, M, Hsr);
 
     // Compute Eigenvalues and right side Eigenvectors of Hsr
-    EigVal(6*numeig, Hsr, eVal1, eVec);
+    CalcEigVal(6*numeig, Hsr, eVal1, eVec);
 
     // Sort Eigenvalues and pick the numeig smallest positive ones
     // and their corresponding eigenvectors
@@ -702,16 +776,16 @@ int main(void) {
     SplitEigVec(numeig, 6*numeig, eVecSort, Xsr, Ysr);
 
     // go from Hsr Eigenvectors to full Eigenvectors
-    /*ComputeEigVec(size, 3*numeig, numeig, X, U, Winv, Xsr, 'X');
+    ComputeEigVec(size, 3*numeig, numeig, X, U, Winv, Xsr, 'X');
     ComputeEigVec(size, 3*numeig, numeig, Y, V, Winv, Ysr, 'Y');
 
     // Normalize Eigenvectors
     NormalizeEigVec(size, numeig, X, Y);
 
     // Calculate residual norm
-    for (int i = 0; i < numeig; i++) {
-      res[i] = GetResidualNorm(size, K, M, X+i*size, Y+i*size, eValSort[i]);
-    }
+    GetResidualNorm(size, numeig, K, M, X, Y, eValSort, res);
+    printf("Print residual error and eigenvalues at iteration %d", iter);
+    printf("\n");
     PrintArray(numeig, 1, res);
     PrintArray(numeig, 1, eValSort);
 
@@ -728,9 +802,8 @@ int main(void) {
     CopyMatrix(size, numeig, Y, eVecwork);
     CopyMatrix(size, numeig, Y1, Y);
     CopyMatrix(size, numeig, eVecwork, Y1);
-    */
   }
-
+  free( singval );
   free( K );
   free( M );
   free( Kinv );
@@ -752,4 +825,5 @@ int main(void) {
   free( Y1 );
   free( eVecwork);
   return 0;
+  
 }

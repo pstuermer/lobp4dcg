@@ -6,6 +6,40 @@
 #include <omp.h>
 #include <cblas.h>
 
+// Routines:
+//
+// - ASum(): Calculates the absolute sum of a vector. Equal to the 1-norm
+//
+// - SubVec(): Substracts two vectors and saves it in vec1
+//
+// - CopyVec(): Copies one vector from vec to target
+//
+// - ScaleVec(): Multiplies a vector with a scalar
+//
+// - DotProduct(): Calculates the dotproduct between two vectors
+//
+// - MatrixVectorMult_X(): Calculates the product between a mxn matrix and
+//                         a m sized vector. Saves the result in out. X may
+//                         be 'T' for transpose of the matrix or 'N' for 
+//                         non-transpose
+//
+// - MatrixMult_XY(): Calculates the product between a mxk matrix A and a
+//                    kxn matrix B and saves it in the mxn matrix C. X and Y
+//                    may be 'T' or 'N' for transpose or non-transpose of A
+//                    or B respectively
+//
+// - MatrixMult_NN_Sub(): Same as MatrixMult, but calculates A*B-C
+//
+// - MatrixTrans(): Calculates the transpose of a input matrix 
+//                  and saves it in dst
+//
+// - Additional Note: The library is based on Fortran, which is column-major.
+//                    However, C is row-major. Thus we need to transpose
+//                    matrices before acting any routine on them. 
+//
+// - Documentation about each library routine can be found on netlib.
+//
+// *****************************************************************************
 
 /*----IMPORT BLAS FORTRAN ROUTINES ----*/
 extern void dgemm_(char* TRANSA, char* TRANSB, int* M, int* N,

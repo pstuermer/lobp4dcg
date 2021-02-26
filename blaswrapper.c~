@@ -6,25 +6,92 @@
 #include <omp.h>
 #include <cblas.h>
 
+// Routines:
+//
+// - ASum(): Calculates the absolute sum of a vector. Equal to the 1-norm
+//
+// - SubVec(): Substracts two vectors and saves it in vec1
+//
+// - CopyVec(): Copies one vector from vec to target
+//
+// - ScaleVec(): Multiplies a vector with a scalar
+//
+// - DotProduct(): Calculates the dotproduct between two vectors
+//
+// - MatrixVectorMult_X(): Calculates the product between a mxn matrix and
+//                         a m sized vector. Saves the result in out. X may
+//                         be 'T' for transpose of the matrix or 'N' for 
+//                         non-transpose
+//
+// - MatrixMult_XY(): Calculates the product between a mxk matrix A and a
+//                    kxn matrix B and saves it in the mxn matrix C. X and Y
+//                    may be 'T' or 'N' for transpose or non-transpose of A
+//                    or B respectively
+//
+// - MatrixMult_NN_Sub(): Same as MatrixMult, but calculates A*B-C
+//
+// - MatrixTrans(): Calculates the transpose of a input matrix 
+//                  and saves it in dst
+//
+// - Additional Note: The library is based on Fortran, which is column-major.
+//                    However, C is row-major. Thus we need to transpose
+//                    matrices before acting any routine on them. 
+//
+// *****************************************************************************
 
-extern void dgemm_(char* TRANSA, char* TRANSB, int* M, int* N, int* K,
-		   double* ALPHA, double* A, int* LDA, double* B,
-		   int* LDB, double* BETA, double* C, int* LDC);
+/*----IMPORT BLAS FORTRAN ROUTINES ----*/
+extern void dgemm_(char* TRANSA, char* TRANSB, int* M, int* N,
+		   int* K, double* ALPHA, double* A, int* LDA,
+		   double* B, int* LDB, double* BETA,
+		   double* C, int* LDC);
 
-extern double ddot_(int* N, double* DX, int* INCX, double* DY, int* INCY);
-extern void dgemv_(char* TRANS, int* M, int* N, double* ALPHA, double* A,
-		   int* LDA, double* X, int* INCX, double* BETA, double* Y,
-		   int* INCY);
+extern double ddot_(int* N, double* DX, int* INCX, 
+		    double* DY, int* INCY);
+extern void dgemv_(char* TRANS, int* M, int* N, double* ALPHA, 
+		   double* A, int* LDA, double* X, int* INCX, 
+		   double* BETA, double* Y, int* INCY);
 extern void dscal_(int* N, double* DA, double* DX, int* INCX);
-extern void dcopy_(int* N, double* DX, int* INCX, double* DY, int* INCY);
-extern void daxpy_(int* N, double* DA, double* DX, int* INCX, double* DY, int* INCY);
+extern void dcopy_(int* N, double* DX, int* INCX, 
+		   double* DY, int* INCY);
+extern void daxpy_(int* N, double* DA, double* DX, int* INCX, 
+		   double* DY, int* INCY);
 extern double dasum_(int* N, double* DX, int* INCX);
 
+
+/*--------WHERE DO I PUT YOU?---------*/
 void* xmalloc(size_t size);
+void* xcalloc(size_t num, size_t size);
+
+/*----------- BLAS LEVEL 1 ------------*/
 double ASum(int n, double* vec);
 void* SubVec(int n, double* vec1, double* vec2);
 void* CopyVec(int n, double* vec, double* target);
-void* MatrixTrans(const int n, const int m, double* src, double* dst);
+void* ScaleVec(int n, double* vec, double alpha);
+double DotProduct(int n, double* v1, double* v2);
+
+/*----------- BLAS LEVEL 2 ------------*/
+void* MatrixVectorMult_N(int m, int n, double* A,
+			 double* x, double* out);
+void* MatrixVectorMult_T(int n, int m, double* A, 
+			 double* x, double* out);
+
+
+/*----------- BLAS LEVEL 3 ------------*/
+void* MatrixMult_NN(int m, int n, int k, double* A,
+		    double* B, double* C);
+void* MatrixMult_NN_Sub(int m, int n, int k, double* A,
+			double* B, double* C);
+void* MatrixMult_TN(int m, int n, int k, double* A,
+		    double* B, double* C);
+void* MatrixMult_NT(int m, int n, int k, double* A,
+		    double* B, double* C);
+void* MatrixMult_TT(int m, int n, int k, double* A,
+		    double* B, double* C);
+void* MatrixTrans(const int n, const int m,
+		  double* src, double* dst);
+
+/*-------------------------------------*/
+
 
 void* xmalloc(size_t size) {
   void* ptr = malloc(size);

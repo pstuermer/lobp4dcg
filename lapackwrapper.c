@@ -11,25 +11,77 @@
 #define max(a,b) (((a)>(b))?(a):(b))
 #define min(a,b) (((a)<(b))?(a):(b))
 
-extern void dgetrf_(int *M, int *N, double *A, int *lda, int *IPIV, int *INFO);
-extern void dgetri_(int* N, double* A, int* lad, int* IPIV, double* WORK, int* lwork, int* INFO);
-extern void dgeev_(char* JOBVL, char* JOBVR, int* N, double* A, int* LDA, double* WR,
-		   double* WI, double* VL, int* LDVL, double* VR, int* LDVR,
-		   double* WORK, int* LWORK, int* INFO);
-extern void dgesdd_(char* JOBZ, int* M, int* N, double* A, int* LDA, double* S, double* U,
-		    int* LDU, double* VT, int* LDVT, double* WORK, int* LWORK, int* IWORK,
+// Routines:
+//
+// - Pinverse(): Calculates the Pseudoinverse of a mxn matrix A and save it in B
+//
+// - CopyMatrix(): Copies a mxn matrix A to target
+//
+// - Get1Norm(): Calculates the 1-norm of a mxn matrix
+//
+// - GetQ(): Performs a QR-factorization of a mxn matrix A and then saves Q in A
+//
+// - SVD(): Performs a singular value decomposition of a mxn matrix A and saves
+//          singular values in s. If needed vectors may also be computed and saved
+//
+// - CalcEigVal(): Calculates eigenvalues and righthand eigenvectors of a nxn matrix
+//                 A and saves them in EigVal and EigVec respectively
+//
+// - MInverse(): Calculates the inverse of a mxm matrix A via LU-decomposition and
+//               replaces the inverse with A
+//
+// - Additional Note: The library is based on Fortran, which is column-major.
+//                    However, C is row-major. Thus we need to transpose
+//                    matrices before acting any routine on them.
+// 
+// - Documentation about each library routine can be found on netlib.
+//
+// *************************************************************************************
+
+/*---- IMPORT LAPACK FORTRAN ROUTINES ----*/
+extern void dgetrf_(int *M, int *N, double *A, int *lda,
+		    int *IPIV, int *INFO);
+
+extern void dgetri_(int* N, double* A, int* lad, int* IPIV, 
+		    double* WORK, int* lwork, int* INFO);
+
+extern void dgeev_(char* JOBVL, char* JOBVR, int* N, double* A,
+		   int* LDA, double* WR, double* WI, double* VL,
+		   int* LDVL, double* VR, int* LDVR, double* WORK,
+		   int* LWORK, int* INFO);
+
+extern void dgesdd_(char* JOBZ, int* M, int* N, double* A, int* LDA,
+		    double* S, double* U, int* LDU, double* VT,
+		    int* LDVT, double* WORK, int* LWORK, int* IWORK,
 		    int* INFO);
-extern void dgeqrf_(int* M, int* N, double* A, int* LDA, double* TAU, double* WORK,
-		   int* LWORK, int* INFO);
-extern void dorgqr_(int* M, int* N, int* K, double* A, int* LDA, double* TAU, double* WORK,
-		   int* LWORK, int* INFO);
-extern void dormqr(char* SIDE, char* TRANS, int* M, int* N, int* K, double* A, int* LDA,
-		   double* TAU, double* C, int* LDC, double* WORK, int* LWORK, int* INFO);
-extern double dlange_(char* NORM, int* M, int* N, double* A, int* LDA, double* WORK);
-extern void dlacpy_(char* UPLO, int* M, int* N, double* A, int* LDA, double* B, int* LDB);
-extern void dgelss_(int* M, int* N, int* NRHS, double* A, int* LDA, double* B,
-		    int* LDB, double* S, double* RCOND, int* RANK, double* WORK,
+extern void dgeqrf_(int* M, int* N, double* A, int* LDA, double* TAU,
+		    double* WORK, int* LWORK, int* INFO);
+
+extern void dorgqr_(int* M, int* N, int* K, double* A, int* LDA,
+		    double* TAU, double* WORK, int* LWORK, int* INFO);
+
+extern void dormqr(char* SIDE, char* TRANS, int* M, int* N, int* K,
+		   double* A, int* LDA, double* TAU, double* C,
+		   int* LDC, double* WORK, int* LWORK, int* INFO);
+
+extern double dlange_(char* NORM, int* M, int* N, double* A,
+		      int* LDA, double* WORK);
+
+extern void dlacpy_(char* UPLO, int* M, int* N, double* A, 
+		    int* LDA, double* B, int* LDB);
+
+extern void dgelss_(int* M, int* N, int* NRHS, double* A, 
+		    int* LDA, double* B, int* LDB, double* S,
+		    double* RCOND, int* RANK, double* WORK,
 		    int* LWORK, int* INFO);
+
+void* Pinverse(int m, int n, double* A, double* B);
+void* CopyMatrix(int m, int n, double* A, double* target);
+double Get1Norm(int m, int n, double* A);
+void* GetQ(int m, int n, double* A);
+void* SVD(int m, int n, double* s, double* A);
+void* CalcEigVal(int n, double* A, double* EigVal, double* EigVec);
+void* MInverse(double* A, int m);
 
 void* Pinverse(int m, int n, double* A, double* B) {
   int M, N, NRHS, LDA, LDB, RANK, LWORK, INFO;
@@ -74,20 +126,20 @@ void* Pinverse(int m, int n, double* A, double* B) {
 void* CopyMatrix(int m, int n, double* A, double* target) {
   char UPLO;
   int M, N, LDA, LDB;
-  double* awork;
+  //  double* awork;
   M = m;
   N = n;
   LDA = M;
-  LDB = N;
+  LDB = M;
 
-  awork = xmalloc(m*n*sizeof(double));
-  MatrixTrans(m, n, A, awork);
+  //awork = xmalloc(m*n*sizeof(double));
+  //MatrixTrans(m, n, A, awork);
 
   UPLO = 'A';
 
-  dlacpy_(&UPLO, &M, &N, awork, &LDA, target, &LDB);
+  dlacpy_(&UPLO, &M, &N, A, &LDA, target, &LDB);
 
-  free( awork );
+  //free( awork );
 
   return NULL;
 }
@@ -239,7 +291,7 @@ void* SVD(int m, int n, double* s, double* A) {
   return NULL;
 }
 
-void* EigVal(int n, double* A, double* EigVal, double* EigVec) {
+void* CalcEigVal(int n, double* A, double* EigVal, double* EigVec) {
   int N, LDA, LDVL, LDVR, INFO, LWORK;
   double WKOPT;
   double* WORK;
@@ -264,26 +316,27 @@ void* EigVal(int n, double* A, double* EigVal, double* EigVec) {
   // Query and allocate the optimal workspace
   LWORK = -1;
   WKOPT = 0.0;
-  dgeev_(&JOBVL, &JOBVR, &N, transA, &LDA, EigVal, WI, VL, &LDVL, EigVec,
+  dgeev_(&JOBVL, &JOBVR, &N, transA, &LDA, EigVal, WI, VL, &LDVL, VR,
 	 &LDVR, &WKOPT, &LWORK, &INFO);
 
   // Calculate eigenvalues and eigenvectors
   LWORK = (int)WKOPT;
   WORK = xmalloc(LWORK*sizeof(double));
-  dgeev_(&JOBVL, &JOBVR, &N, transA, &LDA, EigVal, WI, VL, &LDVL, EigVec,
+  dgeev_(&JOBVL, &JOBVR, &N, transA, &LDA, EigVal, WI, VL, &LDVL, VR,
 	 &LDVR, WORK, &LWORK, &INFO);
-  /*
-  for(int i = 0; i < N; i++) {
-    *(EigVal+i) = *(WR+i);
-  }
-  */
+  
+  //  for(int i = 0; i < N; i++) {
+  //    printf("%f+i*%f\t", *(EigVal+i),*(WI+i));
+  //  }
+  //  printf("\n");
+  
   if (INFO > 0) {
     printf("The algorithm failed to compute eigenvalues.\n");
     exit( 1 );
   }
 
   MatrixTrans(n, n, transA, A);
-  //  MatrixTrans(n, n, VR, EigVec);
+  MatrixTrans(n, n, VR, EigVec);
 
   free( WR );
   free( WI );
